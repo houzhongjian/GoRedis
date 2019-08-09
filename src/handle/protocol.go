@@ -14,8 +14,15 @@ func (r *RedisHandle) ParseProtocol(msg string) {
 	r.Msg = strings.Split(proto, "\n")
 	log.Println(r.Msg)
 
+	//连接.
 	if r.Login() {
 		r.ResponseMsg("OK")
+		return
+	}
+
+	//检查command是否存在.
+	if !r.CheckCommandIsExist() {
+		r.ResponseError("ERR unknown command '" + r.Msg[2] + "'")
 		return
 	}
 
@@ -62,7 +69,6 @@ func (r *RedisHandle) ParseProtocol(msg string) {
 		v := store.Data[k]
 		r.ResponseMsg(v)
 	}
-
 }
 
 func (r *RedisHandle) Login() bool {
@@ -86,6 +92,7 @@ func (r *RedisHandle) Get() bool {
 	return false
 }
 
+//Authorization 登录授权.
 func (r *RedisHandle) Authorization() bool {
 	if r.Msg[2] == "auth" || r.Msg[2] == "AUTH" {
 		return true
@@ -101,4 +108,20 @@ func (r *RedisHandle) CheckAuth() bool {
 	}
 
 	return true
+}
+
+//CheckCommandIsExist 检查command是否存在.
+func (r *RedisHandle) CheckCommandIsExist() bool {
+	commandList := []string{
+		"auth",
+		"set",
+		"get",
+	}
+	for _, v := range commandList {
+		if v == r.Msg[2] {
+			return true
+		}
+	}
+
+	return false
 }
