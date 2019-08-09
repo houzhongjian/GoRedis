@@ -1,5 +1,5 @@
 # GoRedis
-兼容redis协议的key/value数据库
+`GoRedis`使用Go语言开发，兼容redis协议，目前处于不定期维护阶段，不可用于生产环境。
 
 ### 运行方式
 > ./build.sh
