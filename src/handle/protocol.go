@@ -1,7 +1,9 @@
 package handle
 
 import (
+	"fmt"
 	"log"
+	"reflect"
 	"strings"
 
 	"github.com/houzhongjian/GoRedis/src/conf"
@@ -67,7 +69,63 @@ func (r *RedisHandle) ParseProtocol(msg string) {
 		}
 		k := r.Msg[4]
 		v := store.Data[k]
+		vType := reflect.TypeOf(v).String()
+
+		if vType != "string" {
+			r.ResponseError("WRONGTYPE Operation against a key holding the wrong kind of value")
+			return
+		}
+
 		r.ResponseMsg(v)
+	}
+
+	if r.Sadd() {
+		if len(r.Msg) < 8 {
+			r.ResponseError("ERR wrong number of arguments for 'sadd' command")
+			return
+		}
+		k := r.Msg[4]
+
+		var v []interface{}
+		for i := 5; i < len(r.Msg); i++ {
+			if i%2 == 0 {
+				log.Println(r.Msg[i])
+				v = append(v, r.Msg[i])
+			}
+		}
+
+		if _, ok := store.Data[k]; ok {
+			val := store.Data[k]
+			vType := reflect.TypeOf(val).String()
+			if vType == "[]interface {}" {
+				vv := val.([]interface{})
+				for _, item := range vv {
+					v = append(v, item)
+				}
+			}
+		}
+
+		store.Data[k] = v
+		r.ResponseMsg("OK")
+	}
+
+	if r.Smembers() {
+		log.Println(len(r.Msg))
+		if len(r.Msg) != 6 {
+			r.ResponseError("ERR wrong number of arguments for 'smembers' command")
+			return
+		}
+
+		k := r.Msg[4]
+		v := store.Data[k].([]interface{})
+
+		var msg string
+		for k, item := range v {
+			msg += fmt.Sprintf("%d) \"%s\"\n", k+1, item)
+		}
+
+		r.ResponseMsg(msg)
+		return
 	}
 }
 
@@ -116,6 +174,8 @@ func (r *RedisHandle) CheckCommandIsExist() bool {
 		"auth",
 		"set",
 		"get",
+		"sadd",
+		"smembers",
 	}
 	for _, v := range commandList {
 		if v == r.Msg[2] {
@@ -123,5 +183,21 @@ func (r *RedisHandle) CheckCommandIsExist() bool {
 		}
 	}
 
+	return false
+}
+
+//Sadd .
+func (r *RedisHandle) Sadd() bool {
+	if r.Msg[2] == "sadd" || r.Msg[2] == "SADD" {
+		return true
+	}
+	return false
+}
+
+//Smembers .
+func (r *RedisHandle) Smembers() bool {
+	if r.Msg[2] == "smembers" || r.Msg[2] == "SMEMBERS" {
+		return true
+	}
 	return false
 }

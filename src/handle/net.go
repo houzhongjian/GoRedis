@@ -64,9 +64,9 @@ func (r *RedisHandle) Handle() {
 	}
 }
 
-func (r *RedisHandle) ResponseMsg(msg string) {
-	msg = "+" + msg + "\r\n"
-	_, err := r.Conn.Write([]byte(msg))
+func (r *RedisHandle) ResponseMsg(msg interface{}) {
+	m := fmt.Sprintf("+%v\r\n", msg)
+	_, err := r.Conn.Write([]byte(m))
 	if err != nil {
 		log.Printf("err:%+v\n", err)
 		return

@@ -12,3 +12,5 @@
 - AUTH
 - SET 
 - GET
+- SMEMBERS
+- SADD
