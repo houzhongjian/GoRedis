@@ -8,5 +8,5 @@
 > redis-cli -h 127.0.0.1 -p 6378
 
 # 支持的命令
-- set 
-- get
+- SET 
+- GET
