@@ -178,7 +178,7 @@ func (r *RedisHandle) CheckCommandIsExist() bool {
 		"smembers",
 	}
 	for _, v := range commandList {
-		if v == r.Msg[2] {
+		if v == strings.ToLower(r.Msg[2]) {
 			return true
 		}
 	}
