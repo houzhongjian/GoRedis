@@ -86,3 +86,10 @@ func GetBool(key string) bool {
 	}
 	return b
 }
+
+func IsExist(key string) bool {
+	if _, ok := config[key]; ok {
+		return true
+	}
+	return false
+}

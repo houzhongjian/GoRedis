@@ -14,6 +14,7 @@ type RedisHandle struct {
 	Addr string
 	Conn net.Conn
 	Msg  []string
+	Auth bool
 }
 
 //NewRedis .
