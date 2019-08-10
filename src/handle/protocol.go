@@ -117,11 +117,18 @@ func (r *RedisHandle) ParseProtocol(msg string) {
 		}
 
 		k := r.Msg[4]
-		v := store.Data[k].([]interface{})
 
 		var msg string
-		for k, item := range v {
-			msg += fmt.Sprintf("%d) \"%s\"\n", k+1, item)
+		//判断k是否存在.
+		if _, ok := store.Data[k]; ok {
+			if reflect.TypeOf(store.Data[k]).String() != "[]interface {}" {
+				r.ResponseError("WRONGTYPE Operation against a key holding the wrong kind of value")
+				return
+			}
+			v := store.Data[k].([]interface{})
+			for k, item := range v {
+				msg += fmt.Sprintf("%d) \"%s\"\n", k+1, item)
+			}
 		}
 
 		r.ResponseMsg(msg)
