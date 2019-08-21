@@ -5,15 +5,24 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 
 	"github.com/houzhongjian/GoRedis/src/conf"
+	"github.com/houzhongjian/GoRedis/src/store"
 )
 
 //RedisHandle .
 type RedisHandle struct {
-	Addr string
-	Conn net.Conn
-	Msg  []string
+	Lock     sync.RWMutex
+	Addr     string
+	Store    *store.StoreEngine
+	Protocol *Protocol
+	Session  int
+}
+
+//RedisSession .
+type RedisSession struct {
+	IP   string
 	Auth bool
 }
 
@@ -23,7 +32,8 @@ func NewRedis(addr ...string) {
 		addr = append(addr, fmt.Sprintf(":%s", conf.GetString("port")))
 	}
 	redis := RedisHandle{
-		Addr: addr[0],
+		Addr:  addr[0],
+		Store: store.New(),
 	}
 	redis.Start()
 }
@@ -36,48 +46,46 @@ func (r *RedisHandle) Start() {
 	}
 
 	for {
-		r.Conn, err = listen.Accept()
+		conn, err := listen.Accept()
 		if err != nil {
 			log.Printf("%+v\n", err)
 			return
 		}
 
-		go r.Handle()
+		go r.Handle(conn)
 	}
-
 }
 
-func (r *RedisHandle) Handle() {
-	defer r.Conn.Close()
+func (r *RedisHandle) Handle(conn net.Conn) {
+	defer conn.Close()
+
+	ip := conn.RemoteAddr().String()
+	proto := Protocol{
+		Conn:    conn,
+		Store:   r.Store,
+		Session: make(map[string]*RedisSession),
+	}
+
+	proto.Session[ip] = &RedisSession{
+		IP:   ip,
+		Auth: false,
+	}
+	r.Session += 1
+
 	for {
-		data := make([]byte, 1024)
-		_, err := r.Conn.Read(data)
+		log.Println("当前连接数:", r.Session)
+		buffer := make([]byte, 1024)
+		_, err := conn.Read(buffer)
 		if err != nil {
 			if err == io.EOF {
-				r.Conn.Close()
+				r.Session -= 1
+				log.Println(ip, "===>断开连接! 当前连接数为 ", r.Session)
+				conn.Close()
 				return
 			}
 			log.Printf("%+v\n", err)
 		}
 
-		r.ParseProtocol(string(data))
-	}
-}
-
-func (r *RedisHandle) ResponseMsg(msg interface{}) {
-	m := fmt.Sprintf("+%v\r\n", msg)
-	_, err := r.Conn.Write([]byte(m))
-	if err != nil {
-		log.Printf("err:%+v\n", err)
-		return
-	}
-}
-
-func (r *RedisHandle) ResponseError(msg string) {
-	msg = "-" + msg + "\r\n"
-	_, err := r.Conn.Write([]byte(msg))
-	if err != nil {
-		log.Printf("err:%+v\n", err)
-		return
+		proto.ParseProtocol(string(buffer))
 	}
 }
