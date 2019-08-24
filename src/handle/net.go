@@ -15,6 +15,7 @@ import (
 type RedisHandle struct {
 	Lock     sync.RWMutex
 	Addr     string
+	Stores   []*store.StoreEngine
 	Store    *store.StoreEngine
 	Protocol *Protocol
 	Session  int
@@ -31,9 +32,12 @@ func NewRedis(addr ...string) {
 	if len(addr) < 1 {
 		addr = append(addr, fmt.Sprintf(":%s", conf.GetString("port")))
 	}
+
+	storeEngine := store.New()
 	redis := RedisHandle{
-		Addr:  addr[0],
-		Store: store.New(),
+		Addr:   addr[0],
+		Stores: storeEngine,
+		Store:  storeEngine[0],
 	}
 	redis.Start()
 }
@@ -61,9 +65,12 @@ func (r *RedisHandle) Handle(conn net.Conn) {
 
 	ip := conn.RemoteAddr().String()
 	proto := Protocol{
-		Conn:    conn,
-		Store:   r.Store,
-		Session: make(map[string]*RedisSession),
+		Conn:     conn,
+		Session:  make(map[string]*RedisSession),
+		IP:       ip,
+		SelectDB: 0,
+		Store:    r.Store,
+		Stores:   r.Stores,
 	}
 
 	proto.Session[ip] = &RedisSession{
@@ -72,18 +79,19 @@ func (r *RedisHandle) Handle(conn net.Conn) {
 	}
 	r.Session += 1
 
+	log.Println("当前连接数:", r.Session)
 	for {
-		log.Println("当前连接数:", r.Session)
 		buffer := make([]byte, 1024)
-		_, err := conn.Read(buffer)
+		_, err := proto.Conn.Read(buffer)
 		if err != nil {
 			if err == io.EOF {
 				r.Session -= 1
 				log.Println(ip, "===>断开连接! 当前连接数为 ", r.Session)
-				conn.Close()
+				proto.Conn.Close()
 				return
 			}
 			log.Printf("%+v\n", err)
+			return
 		}
 
 		proto.ParseProtocol(string(buffer))

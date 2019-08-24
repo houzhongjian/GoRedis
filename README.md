@@ -12,3 +12,4 @@
 - AUTH
 - SET 
 - GET
+- SELECT

@@ -6,19 +6,24 @@ import (
 	"net"
 	"strings"
 
+	"github.com/houzhongjian/GoRedis/src/utils"
+
 	"github.com/houzhongjian/GoRedis/src/conf"
 	"github.com/houzhongjian/GoRedis/src/store"
 )
 
 type Protocol struct {
-	Conn    net.Conn
-	Msg     []string
-	Session map[string]*RedisSession
-	Store   *store.StoreEngine
+	Conn     net.Conn
+	Msg      []string
+	Session  map[string]*RedisSession
+	Store    *store.StoreEngine
+	Stores   []*store.StoreEngine
+	IP       string
+	SelectDB int //选择的数据库.
 }
 
 func (p *Protocol) ResponseMsg(msg interface{}) {
-	m := fmt.Sprintf("+%v\r\n", msg)
+	m := fmt.Sprintf(`"+%v\r\n"`, msg)
 	_, err := p.Conn.Write([]byte(m))
 	if err != nil {
 		log.Printf("err:%+v\n", err)
@@ -26,74 +31,95 @@ func (p *Protocol) ResponseMsg(msg interface{}) {
 	}
 }
 
-func (p *Protocol) ResponseError(msg string) {
-	msg = "-" + msg + "\r\n"
-	_, err := p.Conn.Write([]byte(msg))
-	if err != nil {
-		log.Printf("err:%+v\n", err)
-		return
-	}
+//Select .
+func (p *Protocol) Select(db int) {
+	p.SelectDB = db
+	p.Store = p.Stores[p.SelectDB]
 }
 
 //parseProtocol 解析协议.
 func (p *Protocol) ParseProtocol(msg string) {
 	proto := strings.Replace(msg, "\r", "", -1)
 	p.Msg = strings.Split(proto, "\n")
-
+	log.Println("select db:", p.SelectDB)
+	log.Println("p.Msg:", p.Msg, len(p.Msg))
 	//连接.
-	if p.Login() {
-		p.ResponseMsg("OK")
+	if p.Connection() {
+		p.Success("OK")
 		return
 	}
 
 	//检查command是否存在.
 	if !p.CheckCommandIsExist() {
-		p.ResponseError("ERR unknown command '" + p.Msg[2] + "'")
+		p.Error("ERR unknown command '" + p.Msg[2] + "'")
 		return
 	}
 
 	//授权.
 	if p.Authorization() {
 		if len(p.Msg) != 6 {
-			p.ResponseError("ERR wrong number of arguments for 'auth' command")
+			p.Error("ERR wrong number of arguments for 'auth' command")
 			return
 		}
 
 		pass := p.Msg[4]
 		if pass != conf.GetString("requirepass") {
-			p.ResponseError("ERR invalid password.")
+			p.Error("ERR invalid password.")
 			return
 		}
 		ip := p.Conn.RemoteAddr().String()
 		p.Session[ip].Auth = true
-		p.ResponseMsg("OK")
+		p.Success("OK")
 		return
 	}
 
 	//检查授权.
 	if !p.CheckAuth() {
-		p.ResponseError("NOAUTH Authentication required.")
+		p.Error("NOAUTH Authentication required.")
+		return
+	}
+
+	//选择库.
+	if p.SelectDatabase() {
+		if len(p.Msg) != 6 {
+			p.Error("(error) ERR wrong number of arguments for 'select' command")
+			return
+		}
+
+		dbnum, err := utils.ParseInt(p.Msg[4])
+		if err != nil {
+			p.Error("(error) ERR invalid DB index")
+			return
+		}
+		if dbnum > conf.GetInt("databases") || dbnum < 0 {
+			p.Error("(error) ERR DB index is out of range")
+			return
+		}
+
+		//切换db
+		p.Select(dbnum)
+		p.Success("ok")
 		return
 	}
 
 	if p.Set() {
 		if len(p.Msg) != 8 {
-			p.ResponseError("ERR wrong number of arguments for 'set' command")
+			p.Error("ERR wrong number of arguments for 'set' command")
 			return
 		}
 		k := p.Msg[4]
 		v := p.Msg[6]
 		if err := p.Store.Insert(k, v); err != nil {
-			p.ResponseError(err.Error())
+			p.Error(err.Error())
 			return
 		}
-		p.ResponseMsg("OK")
+		p.Success("OK")
 		return
 	}
 
 	if p.Get() {
 		if len(p.Msg) != 6 {
-			p.ResponseError("ERR wrong number of arguments for 'get' command")
+			p.Error("ERR wrong number of arguments for 'get' command")
 			return
 		}
 		k := p.Msg[4]
@@ -108,13 +134,17 @@ func (p *Protocol) ParseProtocol(msg string) {
 		// 	}
 		// }
 
-		b, err := p.Store.Query(k)
+		n, msg, err := p.Store.Query(k)
 		if err != nil {
-			p.ResponseError(err.Error())
+			p.Error(err.Error())
+			return
+		}
+		if n < 1 {
+			p.Success("(nil)")
 			return
 		}
 
-		p.ResponseMsg(string(b))
+		p.ResponseOneMsg(msg)
 		return
 	}
 
@@ -177,7 +207,7 @@ func (p *Protocol) ParseProtocol(msg string) {
 	log.Println("end...")
 }
 
-func (p *Protocol) Login() bool {
+func (p *Protocol) Connection() bool {
 	if p.Msg[2] == "command" || p.Msg[2] == "COMMAND" {
 		return true
 	}
@@ -209,7 +239,7 @@ func (p *Protocol) Authorization() bool {
 //CheckAuth 验证是否需要进行权限认证.
 func (p *Protocol) CheckAuth() bool {
 	//判断是否设置了密码.
-	ip := p.Conn.RemoteAddr().String()
+	ip := p.IP
 	if conf.IsExist("requirepass") && !p.Session[ip].Auth {
 		return false
 	}
@@ -223,7 +253,7 @@ func (p *Protocol) CheckCommandIsExist() bool {
 		"auth",
 		"set",
 		"get",
-		// "sadd",
+		"select",
 		// "smembers",
 	}
 	for _, v := range commandList {
@@ -246,6 +276,14 @@ func (p *Protocol) Sadd() bool {
 //Smembers .
 func (p *Protocol) Smembers() bool {
 	if p.Msg[2] == "smembers" || p.Msg[2] == "SMEMBERS" {
+		return true
+	}
+	return false
+}
+
+//SelectDatabase .
+func (p *Protocol) SelectDatabase() bool {
+	if p.Msg[2] == "select" || p.Msg[2] == "SELECT" {
 		return true
 	}
 	return false

@@ -1,14 +1,13 @@
 package store
 
 import (
+	"fmt"
 	"log"
+	"os"
 
 	"github.com/houzhongjian/GoRedis/src/conf"
 	"github.com/syndtr/goleveldb/leveldb"
 )
-
-//todo 存储以后采用rocksdb，目前采用map方便开发测试.
-var Data = make(map[string]interface{})
 
 //StoreEngine .
 type StoreEngine struct {
@@ -16,31 +15,56 @@ type StoreEngine struct {
 	storePath string
 }
 
-func New() *StoreEngine {
+func New() []*StoreEngine {
 	return newStoreEngine()
 }
 
 //newStoreEngine .
-func newStoreEngine() *StoreEngine {
+func newStoreEngine() []*StoreEngine {
 	var storePath = "./store/"
 	if conf.IsExist("storepath") {
 		storePath = conf.GetString("storepath")
 	}
-	eng := &StoreEngine{
-		storePath: storePath,
+
+	//读取redis配置文件获取设置了多少个db.
+	var databases = 16
+	if conf.IsExist("databases") {
+		databases = conf.GetInt("databases")
 	}
 
-	eng.newDB()
-	return eng
+	engList := []*StoreEngine{}
+	//初始化db引擎.
+	for i := 0; i < databases; i++ {
+		eng := &StoreEngine{
+			storePath: storePath,
+		}
+
+		//实例化数据库.
+		eng.initDatabase(i)
+		engList = append(engList, eng)
+	}
+
+	return engList
 }
 
-func (s *StoreEngine) newDB() {
-	db, err := leveldb.OpenFile(s.storePath, nil)
+func (s *StoreEngine) newDB(selectdb int) {
+	path := fmt.Sprintf("%s/db%d", s.storePath, selectdb)
+	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		log.Panicf("%+v\n", err)
 		return
 	}
 	s.db = db
+}
+
+func (s *StoreEngine) initDatabase(db int) {
+	dbpath := fmt.Sprintf("%sdb%d", conf.GetString("storepath"), db)
+	if err := os.MkdirAll(dbpath, os.ModePerm); err != nil {
+		log.Printf("%+v\n", err)
+		return
+	}
+
+	s.newDB(db)
 }
 
 //Insert 记录一条数据.
@@ -49,10 +73,16 @@ func (s *StoreEngine) Insert(key, value string) error {
 }
 
 //Query查询一条数据.
-func (s *StoreEngine) Query(key string) (b []byte, err error) {
-	b, err = s.db.Get([]byte(key), nil)
+func (s *StoreEngine) Query(key string) (msgLen int, msg string, err error) {
+	b, err := s.db.Get([]byte(key), nil)
 	if err != nil && err != leveldb.ErrNotFound {
-		return b, err
+		return 0, msg, err
 	}
-	return b, nil
+
+	if err == leveldb.ErrNotFound {
+		return 0, msg, nil
+	}
+
+	msg = string(b)
+	return len(msg), msg, nil
 }
