@@ -1,17 +1,19 @@
 package command
 
 import (
+	"io/ioutil"
 	"os"
 )
 
 //version .
 func Version() {
 	println("GoRedis Version 0.0.1")
+	os.Exit(0)
 }
 
 //ParseArgs .
 func ParseArgs() {
-	PrintWelcome()
+
 	argv := os.Args
 	argc := len(os.Args)
 	if argc >= 2 {
@@ -19,8 +21,10 @@ func ParseArgs() {
 			Version()
 		}
 	}
+	PrintWelcome()
 }
 
 func PrintWelcome() {
-	Version()
+	b, _ := ioutil.ReadFile("./description")
+	println(string(b))
 }
